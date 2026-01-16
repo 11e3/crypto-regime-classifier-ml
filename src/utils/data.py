@@ -11,10 +11,10 @@ def load_ohlcv(
     date_column: str = "timestamp",
     parse_dates: bool = True,
 ) -> pd.DataFrame:
-    """Load OHLCV data from CSV file.
+    """Load OHLCV data from CSV or Parquet file.
 
     Args:
-        path: Path to CSV file
+        path: Path to CSV or Parquet file
         date_column: Name of the date/timestamp column
         parse_dates: Whether to parse dates
 
@@ -26,8 +26,11 @@ def load_ohlcv(
     if not path.exists():
         raise FileNotFoundError(f"Data file not found: {path}")
 
-    # Read CSV
-    df = pd.read_csv(path)
+    # Read file based on extension
+    if path.suffix.lower() == ".parquet":
+        df = pd.read_parquet(path)
+    else:
+        df = pd.read_csv(path)
 
     # Normalize column names
     df.columns = df.columns.str.lower().str.strip()

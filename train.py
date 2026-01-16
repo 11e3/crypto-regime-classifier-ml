@@ -257,7 +257,7 @@ def main():
 
     if is_deep_learning:
         # Deep learning models need full features (not split)
-        features = extractor.extract(df)
+        features = extractor.transform(df)
         if args.use_lookahead:
             labels = labeler.label_with_lookahead(df)
         else:

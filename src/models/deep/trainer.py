@@ -48,7 +48,7 @@ class Trainer:
 
         # Setup learning rate scheduler
         self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            self.optimizer, mode="min", factor=0.5, patience=5, verbose=False
+            self.optimizer, mode="min", factor=0.5, patience=5
         )
 
     def train(
