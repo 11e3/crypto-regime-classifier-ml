@@ -8,7 +8,8 @@ import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.preprocessing import StandardScaler
+from xgboost import XGBClassifier
+from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.model_selection import cross_val_score, train_test_split
 from sklearn.metrics import classification_report, confusion_matrix
 
@@ -19,6 +20,7 @@ class RegimeClassifier:
     Supports multiple model types:
     - random_forest: Random Forest Classifier
     - gradient_boosting: Gradient Boosting Classifier
+    - xgboost: XGBoost Classifier
     - logistic: Logistic Regression
 
     Usage:
@@ -27,7 +29,7 @@ class RegimeClassifier:
         predictions = model.predict(new_features)
     """
 
-    SUPPORTED_MODELS = ["random_forest", "gradient_boosting", "logistic"]
+    SUPPORTED_MODELS = ["random_forest", "gradient_boosting", "xgboost", "logistic"]
 
     def __init__(
         self,
@@ -57,6 +59,7 @@ class RegimeClassifier:
 
         self.model = self._create_model()
         self.scaler = StandardScaler() if scale_features else None
+        self.label_encoder = LabelEncoder() if model_type == "xgboost" else None
         self.feature_names: Optional[list[str]] = None
         self.is_fitted = False
 
@@ -84,11 +87,25 @@ class RegimeClassifier:
             default_params.update(self.model_params)
             return GradientBoostingClassifier(**default_params)
 
+        elif self.model_type == "xgboost":
+            default_params = {
+                "n_estimators": 100,
+                "max_depth": 6,
+                "learning_rate": 0.1,
+                "subsample": 0.8,
+                "colsample_bytree": 0.8,
+                "random_state": self.random_state,
+                "n_jobs": -1,
+                "use_label_encoder": False,
+                "eval_metric": "mlogloss",
+            }
+            default_params.update(self.model_params)
+            return XGBClassifier(**default_params)
+
         elif self.model_type == "logistic":
             default_params = {
                 "max_iter": 1000,
                 "random_state": self.random_state,
-                "multi_class": "multinomial",
             }
             default_params.update(self.model_params)
             return LogisticRegression(**default_params)
@@ -137,17 +154,25 @@ class RegimeClassifier:
             print(f"Training {self.model_type} classifier...")
             print(f"Training samples: {len(X_train)}, Validation samples: {len(X_val)}")
 
-        self.model.fit(X_train_scaled, y_train)
+        # Encode labels for XGBoost
+        if self.label_encoder:
+            y_train_encoded = self.label_encoder.fit_transform(y_train)
+            y_val_encoded = self.label_encoder.transform(y_val)
+            self.model.fit(X_train_scaled, y_train_encoded)
+        else:
+            self.model.fit(X_train_scaled, y_train)
+
         self.is_fitted = True
 
         # Evaluate
         if verbose:
-            train_acc = self.model.score(X_train_scaled, y_train)
-            val_acc = self.model.score(X_val_scaled, y_val)
+            train_acc = self.model.score(X_train_scaled, y_train_encoded if self.label_encoder else y_train)
+            val_acc = self.model.score(X_val_scaled, y_val_encoded if self.label_encoder else y_val)
             print(f"Training accuracy: {train_acc:.4f}")
             print(f"Validation accuracy: {val_acc:.4f}")
 
-            y_pred = self.model.predict(X_val_scaled)
+            y_pred_raw = self.model.predict(X_val_scaled)
+            y_pred = self.label_encoder.inverse_transform(y_pred_raw) if self.label_encoder else y_pred_raw
             print("\nClassification Report:")
             print(classification_report(y_val, y_pred))
 
@@ -174,7 +199,13 @@ class RegimeClassifier:
         else:
             X_scaled = X[self.feature_names].values
 
-        predictions = self.model.predict(X_scaled)
+        predictions_raw = self.model.predict(X_scaled)
+
+        # Decode predictions for XGBoost
+        if self.label_encoder:
+            predictions = self.label_encoder.inverse_transform(predictions_raw)
+        else:
+            predictions = predictions_raw
 
         if len(predictions) == 1:
             return predictions[0]
@@ -202,11 +233,17 @@ class RegimeClassifier:
 
         probas = self.model.predict_proba(X_scaled)
 
+        # Get class labels (decode for XGBoost)
+        if self.label_encoder:
+            classes = self.label_encoder.classes_
+        else:
+            classes = self.model.classes_
+
         if len(probas) == 1:
-            return dict(zip(self.model.classes_, probas[0]))
+            return dict(zip(classes, probas[0]))
 
         # Return DataFrame for multiple predictions
-        return pd.DataFrame(probas, index=X.index, columns=self.model.classes_)
+        return pd.DataFrame(probas, index=X.index, columns=classes)
 
     def _validate_features(self, X: pd.DataFrame):
         """Validate that input has required features."""
@@ -285,6 +322,7 @@ class RegimeClassifier:
         model_data = {
             "model": self.model,
             "scaler": self.scaler,
+            "label_encoder": self.label_encoder,
             "feature_names": self.feature_names,
             "model_type": self.model_type,
             "model_params": self.model_params,
@@ -316,6 +354,7 @@ class RegimeClassifier:
 
         instance.model = model_data["model"]
         instance.scaler = model_data["scaler"]
+        instance.label_encoder = model_data.get("label_encoder")
         instance.feature_names = model_data["feature_names"]
         instance.is_fitted = True
 
