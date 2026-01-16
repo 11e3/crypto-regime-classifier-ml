@@ -103,9 +103,9 @@ def parse_args():
     parser.add_argument(
         "--n-classes",
         type=int,
-        default=3,
-        choices=[3, 4],
-        help="Number of classes (3: BULL/BEAR/SIDEWAYS, 4: includes HIGH_VOL)",
+        default=2,
+        choices=[2, 3, 4],
+        help="Number of classes (2: BULL/NOT_BULL, 3: BULL/BEAR/SIDEWAYS, 4: includes HIGH_VOL)",
     )
 
     # Feature arguments

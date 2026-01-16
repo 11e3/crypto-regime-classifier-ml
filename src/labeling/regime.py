@@ -14,6 +14,7 @@ class RegimeType(str, Enum):
     BEAR_TREND = "BEAR_TREND"
     SIDEWAYS = "SIDEWAYS"
     HIGH_VOL = "HIGH_VOL"
+    NOT_BULL = "NOT_BULL"  # For 2-class classification
 
 
 class RegimeLabeler:
@@ -31,6 +32,10 @@ class RegimeLabeler:
 
         # For 3-class classification (merges HIGH_VOL into SIDEWAYS)
         labeler = RegimeLabeler(n_classes=3)
+        labels = labeler.label(ohlcv_df)
+
+        # For 2-class classification (BULL vs NOT_BULL)
+        labeler = RegimeLabeler(n_classes=2)
         labels = labeler.label(ohlcv_df)
     """
 
@@ -53,10 +58,13 @@ class RegimeLabeler:
             vol_window: Window for calculating volatility
             vol_lookback: Lookback period for volatility percentile
             min_trend_days: Minimum consecutive days to confirm trend
-            n_classes: Number of classes (3 or 4). If 3, HIGH_VOL is merged into SIDEWAYS
+            n_classes: Number of classes (2, 3, or 4).
+                       2: BULL vs NOT_BULL
+                       3: BULL/BEAR/SIDEWAYS (HIGH_VOL merged into SIDEWAYS)
+                       4: BULL/BEAR/SIDEWAYS/HIGH_VOL
         """
-        if n_classes not in [3, 4]:
-            raise ValueError("n_classes must be 3 or 4")
+        if n_classes not in [2, 3, 4]:
+            raise ValueError("n_classes must be 2, 3, or 4")
 
         self.trend_threshold = trend_threshold
         self.vol_percentile = vol_percentile
@@ -106,9 +114,14 @@ class RegimeLabeler:
         # Apply minimum trend duration filter
         labels = self._apply_min_duration(labels)
 
-        # Merge HIGH_VOL into SIDEWAYS for 3-class classification
+        # Merge classes based on n_classes setting
         if self.n_classes == 3:
             labels = labels.replace(RegimeType.HIGH_VOL.value, RegimeType.SIDEWAYS.value)
+        elif self.n_classes == 2:
+            # BULL vs NOT_BULL (everything else is NOT_BULL)
+            labels = labels.replace(RegimeType.HIGH_VOL.value, RegimeType.NOT_BULL.value)
+            labels = labels.replace(RegimeType.BEAR_TREND.value, RegimeType.NOT_BULL.value)
+            labels = labels.replace(RegimeType.SIDEWAYS.value, RegimeType.NOT_BULL.value)
 
         return labels
 
@@ -191,9 +204,14 @@ class RegimeLabeler:
         labels[bull_signal & not_high_vol] = RegimeType.BULL_TREND.value
         labels[bear_signal & not_high_vol] = RegimeType.BEAR_TREND.value
 
-        # Merge HIGH_VOL into SIDEWAYS for 3-class classification
+        # Merge classes based on n_classes setting
         if self.n_classes == 3:
             labels = labels.replace(RegimeType.HIGH_VOL.value, RegimeType.SIDEWAYS.value)
+        elif self.n_classes == 2:
+            # BULL vs NOT_BULL (everything else is NOT_BULL)
+            labels = labels.replace(RegimeType.HIGH_VOL.value, RegimeType.NOT_BULL.value)
+            labels = labels.replace(RegimeType.BEAR_TREND.value, RegimeType.NOT_BULL.value)
+            labels = labels.replace(RegimeType.SIDEWAYS.value, RegimeType.NOT_BULL.value)
 
         return labels
 

@@ -222,9 +222,15 @@ class DeepRegimeClassifier(ABC):
         self._validate_features(X)
         proba = self._predict_proba_internal(X)
 
-        # Get class names
-        label_map = RegimeDataset.LABEL_MAP_3CLASS if self.n_classes == 3 else RegimeDataset.LABEL_MAP
-        class_names = list(label_map.keys())
+        # Get class names (must be sorted by class index to match probability order)
+        if self.n_classes == 2:
+            label_map = RegimeDataset.LABEL_MAP_2CLASS
+        elif self.n_classes == 3:
+            label_map = RegimeDataset.LABEL_MAP_3CLASS
+        else:
+            label_map = RegimeDataset.LABEL_MAP
+        # Sort by class index so column order matches probability array order
+        class_names = [k for k, v in sorted(label_map.items(), key=lambda x: x[1])]
 
         if len(proba) == 1:
             return dict(zip(class_names, proba[0]))

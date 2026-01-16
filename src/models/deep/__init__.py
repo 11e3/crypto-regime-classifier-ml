@@ -6,6 +6,7 @@ from .trainer import Trainer, EarlyStopping
 from .lstm import LSTMClassifier
 from .transformer import TransformerClassifier
 from .cnn_lstm import CNNLSTMClassifier
+from .ensemble import DeepEnsemble
 
 __all__ = [
     "DeepRegimeClassifier",
@@ -16,4 +17,5 @@ __all__ = [
     "LSTMClassifier",
     "TransformerClassifier",
     "CNNLSTMClassifier",
+    "DeepEnsemble",
 ]

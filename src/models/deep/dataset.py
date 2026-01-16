@@ -35,6 +35,11 @@ class RegimeDataset(Dataset):
         "SIDEWAYS": 2,
     }
 
+    LABEL_MAP_2CLASS = {
+        "BULL_TREND": 1,
+        "NOT_BULL": 0,
+    }
+
     def __init__(
         self,
         features: pd.DataFrame,
@@ -52,11 +57,16 @@ class RegimeDataset(Dataset):
             seq_length: Number of time steps in each sequence
             scaler: Optional pre-fitted scaler. If None, creates new one
             fit_scaler: Whether to fit the scaler on this data
-            n_classes: Number of classes (3 or 4)
+            n_classes: Number of classes (2, 3, or 4)
         """
         self.seq_length = seq_length
         self.n_classes = n_classes
-        self.label_map = self.LABEL_MAP_3CLASS if n_classes == 3 else self.LABEL_MAP
+        if n_classes == 2:
+            self.label_map = self.LABEL_MAP_2CLASS
+        elif n_classes == 3:
+            self.label_map = self.LABEL_MAP_3CLASS
+        else:
+            self.label_map = self.LABEL_MAP
 
         # Align indices
         common_idx = features.index.intersection(labels.index)
@@ -150,7 +160,12 @@ class RegimeDataset(Dataset):
         Returns:
             String label name
         """
-        label_map = RegimeDataset.LABEL_MAP_3CLASS if n_classes == 3 else RegimeDataset.LABEL_MAP
+        if n_classes == 2:
+            label_map = RegimeDataset.LABEL_MAP_2CLASS
+        elif n_classes == 3:
+            label_map = RegimeDataset.LABEL_MAP_3CLASS
+        else:
+            label_map = RegimeDataset.LABEL_MAP
         reverse_map = {v: k for k, v in label_map.items()}
         return reverse_map.get(label_idx, "UNKNOWN")
 
@@ -174,7 +189,7 @@ def create_dataloaders(
         batch_size: Batch size for dataloaders
         train_ratio: Fraction of data for training
         val_ratio: Fraction of data for validation
-        n_classes: Number of classes (3 or 4)
+        n_classes: Number of classes (2, 3, or 4)
         shuffle_train: Whether to shuffle training data
 
     Returns:
