@@ -28,6 +28,10 @@ class RegimeLabeler:
     Usage:
         labeler = RegimeLabeler(trend_threshold=0.02, vol_percentile=80)
         labels = labeler.label(ohlcv_df)
+
+        # For 3-class classification (merges HIGH_VOL into SIDEWAYS)
+        labeler = RegimeLabeler(n_classes=3)
+        labels = labeler.label(ohlcv_df)
     """
 
     def __init__(
@@ -38,6 +42,7 @@ class RegimeLabeler:
         vol_window: int = 20,
         vol_lookback: int = 252,
         min_trend_days: int = 3,
+        n_classes: int = 4,
     ):
         """Initialize the regime labeler.
 
@@ -48,13 +53,18 @@ class RegimeLabeler:
             vol_window: Window for calculating volatility
             vol_lookback: Lookback period for volatility percentile
             min_trend_days: Minimum consecutive days to confirm trend
+            n_classes: Number of classes (3 or 4). If 3, HIGH_VOL is merged into SIDEWAYS
         """
+        if n_classes not in [3, 4]:
+            raise ValueError("n_classes must be 3 or 4")
+
         self.trend_threshold = trend_threshold
         self.vol_percentile = vol_percentile
         self.return_window = return_window
         self.vol_window = vol_window
         self.vol_lookback = vol_lookback
         self.min_trend_days = min_trend_days
+        self.n_classes = n_classes
 
     def label(self, df: pd.DataFrame) -> pd.Series:
         """Label each row with a market regime.
@@ -95,6 +105,10 @@ class RegimeLabeler:
 
         # Apply minimum trend duration filter
         labels = self._apply_min_duration(labels)
+
+        # Merge HIGH_VOL into SIDEWAYS for 3-class classification
+        if self.n_classes == 3:
+            labels = labels.replace(RegimeType.HIGH_VOL.value, RegimeType.SIDEWAYS.value)
 
         return labels
 
@@ -176,6 +190,10 @@ class RegimeLabeler:
         not_high_vol = ~high_vol_mask
         labels[bull_signal & not_high_vol] = RegimeType.BULL_TREND.value
         labels[bear_signal & not_high_vol] = RegimeType.BEAR_TREND.value
+
+        # Merge HIGH_VOL into SIDEWAYS for 3-class classification
+        if self.n_classes == 3:
+            labels = labels.replace(RegimeType.HIGH_VOL.value, RegimeType.SIDEWAYS.value)
 
         return labels
 

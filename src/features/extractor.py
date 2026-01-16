@@ -5,13 +5,18 @@ import pandas as pd
 from src.features.price import PriceFeatures
 from src.features.volume import VolumeFeatures
 from src.features.structure import StructureFeatures
+from src.features.advanced import AdvancedFeatures
 
 
 class FeatureExtractor:
-    """Main feature extractor that combines price, volume, and structure features.
+    """Main feature extractor that combines price, volume, structure, and advanced features.
 
     Usage:
         extractor = FeatureExtractor()
+        features = extractor.transform(ohlcv_df)
+
+        # For deep learning (include advanced features)
+        extractor = FeatureExtractor(include_advanced=True)
         features = extractor.transform(ohlcv_df)
     """
 
@@ -20,17 +25,21 @@ class FeatureExtractor:
         include_price: bool = True,
         include_volume: bool = True,
         include_structure: bool = True,
+        include_advanced: bool = False,
         price_params: dict = None,
         volume_params: dict = None,
         structure_params: dict = None,
+        advanced_params: dict = None,
     ):
         self.include_price = include_price
         self.include_volume = include_volume
         self.include_structure = include_structure
+        self.include_advanced = include_advanced
 
         self.price_extractor = PriceFeatures(**(price_params or {})) if include_price else None
         self.volume_extractor = VolumeFeatures(**(volume_params or {})) if include_volume else None
         self.structure_extractor = StructureFeatures(**(structure_params or {})) if include_structure else None
+        self.advanced_extractor = AdvancedFeatures(**(advanced_params or {})) if include_advanced else None
 
     def transform(self, df: pd.DataFrame, dropna: bool = True) -> pd.DataFrame:
         """Extract all features from OHLCV data.
@@ -62,6 +71,10 @@ class FeatureExtractor:
             structure_features = self.structure_extractor.transform(df)
             features_list.append(structure_features)
 
+        if self.advanced_extractor:
+            advanced_features = self.advanced_extractor.transform(df)
+            features_list.append(advanced_features)
+
         if not features_list:
             raise ValueError("At least one feature type must be enabled")
 
@@ -88,6 +101,9 @@ class FeatureExtractor:
 
         if self.structure_extractor:
             names.extend(self.structure_extractor.get_feature_names())
+
+        if self.advanced_extractor:
+            names.extend(self.advanced_extractor.get_feature_names())
 
         # Remove duplicates while preserving order
         seen = set()

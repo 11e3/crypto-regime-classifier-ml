@@ -6,7 +6,13 @@ from pathlib import Path
 
 from src.features import FeatureExtractor
 from src.labeling import RegimeLabeler
-from src.models import RegimeClassifier, EnsembleClassifier
+from src.models import (
+    RegimeClassifier,
+    EnsembleClassifier,
+    LSTMClassifier,
+    TransformerClassifier,
+    CNNLSTMClassifier,
+)
 from src.utils.data import load_ohlcv, load_multiple_symbols, prepare_training_data
 
 
@@ -37,7 +43,10 @@ def parse_args():
         "--model",
         type=str,
         default="random_forest",
-        choices=["random_forest", "gradient_boosting", "logistic", "ensemble"],
+        choices=[
+            "random_forest", "gradient_boosting", "logistic", "ensemble",
+            "lstm", "transformer", "cnn_lstm",
+        ],
         help="Model type to train",
     )
     parser.add_argument(
@@ -48,6 +57,57 @@ def parse_args():
         help="Models to use in ensemble",
     )
 
+    # Deep learning arguments
+    parser.add_argument(
+        "--seq-length",
+        type=int,
+        default=60,
+        help="Sequence length for deep learning models",
+    )
+    parser.add_argument(
+        "--hidden-size",
+        type=int,
+        default=128,
+        help="Hidden dimension size for deep learning models",
+    )
+    parser.add_argument(
+        "--num-layers",
+        type=int,
+        default=2,
+        help="Number of layers for deep learning models",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=32,
+        help="Batch size for deep learning training",
+    )
+    parser.add_argument(
+        "--epochs",
+        type=int,
+        default=100,
+        help="Maximum training epochs for deep learning",
+    )
+    parser.add_argument(
+        "--learning-rate",
+        type=float,
+        default=0.001,
+        help="Learning rate for deep learning",
+    )
+    parser.add_argument(
+        "--patience",
+        type=int,
+        default=10,
+        help="Early stopping patience",
+    )
+    parser.add_argument(
+        "--n-classes",
+        type=int,
+        default=3,
+        choices=[3, 4],
+        help="Number of classes (3: BULL/BEAR/SIDEWAYS, 4: includes HIGH_VOL)",
+    )
+
     # Feature arguments
     parser.add_argument(
         "--features",
@@ -55,6 +115,11 @@ def parse_args():
         default="all",
         choices=["all", "price", "volume", "structure"],
         help="Feature types to use",
+    )
+    parser.add_argument(
+        "--advanced-features",
+        action="store_true",
+        help="Include advanced features (recommended for deep learning)",
     )
 
     # Labeling arguments
@@ -147,9 +212,11 @@ def main():
         "include_price": args.features in ["all", "price"],
         "include_volume": args.features in ["all", "volume"],
         "include_structure": args.features in ["all", "structure"],
+        "include_advanced": args.advanced_features,
     }
     extractor = FeatureExtractor(**feature_config)
     print(f"Feature types: {args.features}")
+    print(f"Advanced features: {args.advanced_features}")
     print(f"Total features: {len(extractor.get_feature_names())}")
 
     # Initialize labeler
@@ -157,9 +224,11 @@ def main():
     labeler = RegimeLabeler(
         trend_threshold=args.trend_threshold,
         vol_percentile=args.vol_percentile,
+        n_classes=args.n_classes,
     )
     print(f"Trend threshold: {args.trend_threshold}")
     print(f"Volatility percentile: {args.vol_percentile}")
+    print(f"Number of classes: {args.n_classes}")
 
     # Prepare training data
     print("\n[4/5] Preparing training data...")
@@ -180,57 +249,125 @@ def main():
         pct = count / len(y_train) * 100
         print(f"  {label}: {count} ({pct:.1f}%)")
 
+    # Check if using deep learning model
+    is_deep_learning = args.model in ["lstm", "transformer", "cnn_lstm"]
+
     # Train model
     print("\n[5/5] Training model...")
-    if args.model == "ensemble":
-        model = EnsembleClassifier(
-            model_types=args.ensemble_models,
-            voting="soft",
-            random_state=args.random_state,
-        )
+
+    if is_deep_learning:
+        # Deep learning models need full features (not split)
+        features = extractor.extract(df)
+        if args.use_lookahead:
+            labels = labeler.label_with_lookahead(df)
+        else:
+            labels = labeler.label(df)
+
+        # Create deep learning model
+        deep_model_params = {
+            "seq_length": args.seq_length,
+            "hidden_size": args.hidden_size,
+            "num_layers": args.num_layers,
+            "n_classes": args.n_classes,
+            "learning_rate": args.learning_rate,
+            "batch_size": args.batch_size,
+            "epochs": args.epochs,
+            "patience": args.patience,
+            "random_state": args.random_state,
+        }
+
+        if args.model == "lstm":
+            model = LSTMClassifier(**deep_model_params)
+        elif args.model == "transformer":
+            model = TransformerClassifier(**deep_model_params)
+        elif args.model == "cnn_lstm":
+            model = CNNLSTMClassifier(**deep_model_params)
+
+        print(f"Model: {args.model.upper()}")
+        print(f"Sequence length: {args.seq_length}")
+        print(f"Hidden size: {args.hidden_size}")
+        print(f"Batch size: {args.batch_size}")
+        print(f"Max epochs: {args.epochs}")
+
+        model.fit(features, labels, eval_split=args.test_size, verbose=True)
+
+        # Evaluate on test set (deep learning handles split internally)
+        print("\n" + "=" * 60)
+        print("Test Set Evaluation")
+        print("=" * 60)
+
+        # Get predictions on last portion of data
+        n_test = int(len(features) * args.test_size)
+        test_features = features.iloc[-n_test:]
+        test_labels = labels.iloc[-n_test:]
+
+        y_pred = model.predict(test_features)
+        # Align predictions with labels (accounting for seq_length)
+        valid_test_labels = test_labels.iloc[args.seq_length - 1:]
+
+        if len(y_pred) > 0 and len(valid_test_labels) > 0:
+            test_acc = (y_pred == valid_test_labels).mean()
+            print(f"Test accuracy: {test_acc:.4f}")
+
+            from sklearn.metrics import classification_report
+            print("\nClassification Report (Test Set):")
+            print(classification_report(valid_test_labels, y_pred))
+
     else:
-        model = RegimeClassifier(
-            model_type=args.model,
-            random_state=args.random_state,
-        )
+        # Traditional ML models
+        if args.model == "ensemble":
+            model = EnsembleClassifier(
+                model_types=args.ensemble_models,
+                voting="soft",
+                random_state=args.random_state,
+            )
+        else:
+            model = RegimeClassifier(
+                model_type=args.model,
+                random_state=args.random_state,
+            )
 
-    model.fit(X_train, y_train, verbose=True)
+        model.fit(X_train, y_train, verbose=True)
 
-    # Evaluate on test set
-    print("\n" + "=" * 60)
-    print("Test Set Evaluation")
-    print("=" * 60)
+        # Evaluate on test set
+        print("\n" + "=" * 60)
+        print("Test Set Evaluation")
+        print("=" * 60)
 
-    y_pred = model.predict(X_test)
-    test_acc = (y_pred == y_test).mean()
-    print(f"Test accuracy: {test_acc:.4f}")
+        y_pred = model.predict(X_test)
+        test_acc = (y_pred == y_test).mean()
+        print(f"Test accuracy: {test_acc:.4f}")
 
-    # Show per-class performance
-    from sklearn.metrics import classification_report
-    print("\nClassification Report (Test Set):")
-    print(classification_report(y_test, y_pred))
+        # Show per-class performance
+        from sklearn.metrics import classification_report
+        print("\nClassification Report (Test Set):")
+        print(classification_report(y_test, y_pred))
 
-    # Cross-validation (if single model)
-    if args.model != "ensemble" and args.cv_folds > 1:
-        print("\nCross-Validation:")
-        # Combine train and test for CV
-        X_all = X_train._append(X_test)
-        y_all = y_train._append(y_test)
-        cv_results = model.cross_validate(X_all, y_all, cv=args.cv_folds)
-        print(f"CV Accuracy: {cv_results['mean_accuracy']:.4f} (+/- {cv_results['std_accuracy']:.4f})")
+        # Cross-validation (if single model)
+        if args.model != "ensemble" and args.cv_folds > 1:
+            print("\nCross-Validation:")
+            # Combine train and test for CV
+            X_all = X_train._append(X_test)
+            y_all = y_train._append(y_test)
+            cv_results = model.cross_validate(X_all, y_all, cv=args.cv_folds)
+            print(f"CV Accuracy: {cv_results['mean_accuracy']:.4f} (+/- {cv_results['std_accuracy']:.4f})")
 
-    # Feature importance
-    if args.model != "ensemble":
-        print("\nTop 10 Feature Importance:")
-        importance = model.get_feature_importance()
-        for i, (feat, imp) in enumerate(importance.head(10).items()):
-            print(f"  {i+1}. {feat}: {imp:.4f}")
+        # Feature importance
+        if args.model != "ensemble":
+            print("\nTop 10 Feature Importance:")
+            importance = model.get_feature_importance()
+            for i, (feat, imp) in enumerate(importance.head(10).items()):
+                print(f"  {i+1}. {feat}: {imp:.4f}")
 
     # Save model
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    model_filename = f"regime_classifier_{args.version}.pkl"
+    # Use .pt extension for deep learning models
+    if is_deep_learning:
+        model_filename = f"regime_classifier_{args.model}_{args.version}.pt"
+    else:
+        model_filename = f"regime_classifier_{args.version}.pkl"
     model_path = output_dir / model_filename
 
     model.save(model_path)
